@@ -1,3 +1,5 @@
+import { firebaseApp, firebaseConfig } from './firebase-init.js';
+
 const app = document.querySelector('#app');
 
 const estadoInicial = {
@@ -13,7 +15,7 @@ function render() {
         <p class="eyebrow">INGEST</p>
         <h1>Inventario y Gestión</h1>
       </div>
-      <span class="status-pill">Base limpia</span>
+      <span class="status-pill">Firebase conectado</span>
     </header>
     <div class="layout ${estadoInicial.menuAbierto ? '' : 'layout-menu-collapsed'}">
       <aside class="sidebar" aria-label="Navegación principal">
@@ -34,7 +36,7 @@ function render() {
         <section class="status-grid" aria-label="Estado del proyecto">
           <article class="status-card"><span class="card-label">Frontend</span><strong>JavaScript</strong><p>HTML, CSS y módulos nativos.</p></article>
           <article class="status-card"><span class="card-label">Build</span><strong>Sin build</strong><p>Archivos visibles y fáciles de depurar.</p></article>
-          <article class="status-card"><span class="card-label">Datos</span><strong>Por definir</strong><p>La API y MySQL se agregarán después del contrato.</p></article>
+          <article class="status-card"><span class="card-label">Firebase</span><strong>${firebaseConfig.projectId}</strong><p>Proyecto aislado para INGEST.</p></article>
         </section>
         <section class="next-step">
           <h3>Siguiente función</h3>
