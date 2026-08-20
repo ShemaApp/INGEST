@@ -4,20 +4,16 @@ INGEST es la nueva base de una aplicación de inventario y gestión construida d
 
 ## Decisión técnica inicial
 
-La primera etapa utiliza módulos nativos del navegador (`<script type="module">`) para que cada archivo sea visible, fácil de probar y sencillo de depurar. No se reutilizan reglas, índices, colecciones ni lógica heredada de Firebase.
+La primera etapa utiliza módulos nativos del navegador (`<script type="module">`) para que cada archivo sea visible, fácil de probar y sencillo de depurar. El único proyecto Firebase autorizado es `ingest-manu`; no se reutilizan reglas, índices, colecciones ni lógica heredada de otros proyectos.
 
-La base de datos prevista es MySQL/MariaDB, pero el navegador no se conectará directamente a ella. Cuando se apruebe el contrato de datos, se agregará una API backend en JavaScript que validará autenticación, permisos, entradas y transacciones SQL.
+La base de datos será **Cloud Firestore** dentro del proyecto Firebase `ingest-manu`. La PWA utilizará los SDK modulares de Firebase por CDN, Authentication y reglas de seguridad. No se reutilizarán datos, colecciones ni reglas de otro proyecto.
 
 ```text
-Frontend PWA sin build
+PWA Vanilla JavaScript sin build
         |
-        | HTTPS / JSON
+        | SDK modular Firebase
         v
-API Node.js en JavaScript
-        |
-        | SQL parametrizado
-        v
-MySQL / MariaDB
+Firebase Authentication + Cloud Firestore
 ```
 
 ## Estructura actual
@@ -35,7 +31,7 @@ Cada pantalla se diseñará antes de codificarse. Cada función deberá tener un
 
 Los módulos se implementarán en verticales pequeñas. El primer vertical será inicio de sesión, usuario administrador, producto, venta directa, caja e inventario. Clientes, QR, rutas, repartidores, créditos, jornadas, medidores y planta se incorporarán después de aprobar el núcleo.
 
-No se deben guardar contraseñas, credenciales SQL o secretos en el frontend ni en GitHub. Las variables privadas pertenecerán únicamente al backend y se cargarán mediante variables de entorno.
+No se deben guardar contraseñas, tokens administrativos ni claves privadas en el frontend ni en GitHub. La configuración web de Firebase identifica el proyecto, pero la autorización real se impondrá mediante Authentication y Firestore Security Rules.
 
 ## Ejecutar localmente
 
@@ -49,4 +45,4 @@ Después abre `http://localhost:4173` en el navegador. No se recomienda abrir `i
 
 ## Próximo paso
 
-Antes de construir autenticación o base de datos se presentará el modelo visual de la pantalla de inicio de sesión y se aprobarán sus campos, estados y flujo de error.
+Antes de construir módulos de negocio se presentará el modelo visual de la pantalla de inicio de sesión y se aprobarán sus campos, estados y flujo de error. Después se configurarán Authentication y las primeras reglas de Firestore.
