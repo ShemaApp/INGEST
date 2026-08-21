@@ -489,3 +489,76 @@ La aplicación no debe ofrecer `Eliminar cliente`; debe ofrecer `Archivar client
 6. Primero se valida la devolución; después se desvincula el activo; finalmente se archiva el cliente.
 7. El tambo conserva su unidad, código físico, capacidad e historial al archivarse el cliente.
 8. El tambo liberado puede asignarse a un cliente nuevo sin duplicar el activo.
+
+
+# Enmienda aprobada — Límite de tambos por tipo de cliente
+
+## 28. Regla de cantidad por tipo de cliente
+
+La cantidad máxima de tambos adheridos depende del tipo de cliente:
+
+| Tipo de cliente | Tambos permitidos | Regla |
+|---|---:|---|
+| `comercial` | 0 o 1 | Nunca puede tener dos o más tambos simultáneamente. |
+| `industrial` | 0 o más | Puede tener dos o más tambos, cada uno como activo físico independiente. |
+
+El formulario debe ocultar o bloquear la opción de agregar un segundo tambo para clientes comerciales. Si se cambia un cliente industrial a comercial, el cambio debe bloquearse mientras tenga más de un tambo asignado; primero deben devolverse y validarse los activos excedentes.
+
+## 29. Relación de activos en clientes industriales
+
+Para soportar múltiples tambos, el cliente industrial debe mantener una relación de activos vigentes:
+
+```text
+clientes/{clienteId}
+{
+  tipo: "industrial",
+  requiereTambo: true,
+  activoTamboIds: ["tambo_001", "tambo_002"],
+  cantidadTambosAsignados: 2,
+  capacidadTotalTambosLitros: 850
+}
+```
+
+`activoTamboIds` es una referencia de consulta rápida. La fuente de verdad de cada activo continúa siendo `activos_tambos/{activoId}`. Cada elemento de la lista debe apuntar a un activo cuyo `clienteId` coincida con el cliente y cuyo estado sea `adherido`.
+
+Para clientes comerciales se conservará como máximo un elemento en `activoTamboIds`. La migración futura desde el modelo de un solo `activoTamboId` debe evitar duplicar referencias y deberá ejecutarse mediante una operación controlada, no desde la interfaz.
+
+## 30. Devolución parcial industrial
+
+Un cliente industrial puede devolver uno o varios tambos sin devolverlos todos. Cada tambo devuelto genera su propio folio:
+
+```text
+DEV-2026-000021 → TMB-001 → validada → disponible
+DEV-2026-000022 → TMB-002 → pendiente
+```
+
+La devolución de `TMB-001` no libera ni modifica `TMB-002`. Mientras existan otros elementos en `activoTamboIds`, el cliente industrial permanece activo y puede continuar operando con los activos restantes.
+
+El folio debe identificar exactamente un `activoId`. Si se reciben tres tambos, se generan tres devoluciones foliadas, aunque se capturen en una misma pantalla o visita. La pantalla puede ofrecer `Devolución múltiple`, pero internamente debe crear un registro independiente por tambo para mantener trazabilidad individual.
+
+## 31. Archivado de clientes industriales
+
+Un cliente industrial no puede archivarse mientras `activoTamboIds` contenga elementos o mientras Firestore detecte activos adheridos a ese cliente. El archivado solo se habilita cuando todos los tambos asignados han sido devueltos y validados.
+
+La validación de archivado debe comprobar:
+
+```text
+activoTamboIds está vacío
+cantidadTambosAsignados == 0
+no existe activos_tambos con clienteId == clienteId y estado == adherido
+```
+
+Al archivar, se limpian las referencias activas del cliente, pero no se eliminan los documentos de activos, devoluciones, movimientos ni auditorías. Los tambos quedan `disponibles` o `en_revision` según la revisión física de cada devolución.
+
+## 32. Criterios adicionales de aceptación
+
+1. Un cliente comercial nunca puede tener más de un tambo adherido.
+2. Un cliente industrial puede tener múltiples tambos, sin límite fijo en esta versión.
+3. Cada tambo industrial tiene su propio código físico, capacidad, estado e historial.
+4. Una devolución parcial no afecta los tambos industriales que permanecen adheridos.
+5. Cada tambo devuelto recibe un folio independiente e inmutable.
+6. Una captura masiva de devoluciones no combina los activos en un solo registro histórico.
+7. Un cliente industrial solo puede archivarse cuando todos sus activos fueron devueltos y validados.
+8. Un cliente comercial solo puede archivarse después de devolver y validar su único tambo, si tenía uno.
+9. Cambiar industrial a comercial se bloquea si el cliente conserva dos o más tambos.
+10. No se elimina ningún activo físico al archivar un cliente.
