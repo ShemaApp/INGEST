@@ -249,13 +249,109 @@ El administrador controla el periodo. Puede solicitar un resumen operativo en cu
 
 Un reinicio manual no elimina ventas. Crea un evento de corte y hace que las ventas posteriores pertenezcan a un nuevo periodo.
 
-## 11. Ciclo operativo de fecha, lectura y cierre de caja
+## 11. Estados de sesión del chofer
+
+Después de cerrar un periodo, el chofer no entra directamente a una pantalla operativa. La aplicación inicia en **modo lectura**, que permite consultar el resumen y preparar el siguiente turno, pero bloquea ventas, créditos, movimientos y cualquier operación que consuma o registre actividad.
+
+Los estados funcionales son:
+
+| Estado | Qué puede hacer el chofer | Qué queda bloqueado |
+|---|---|---|
+| `modo_lectura` | Consultar resumen, último vehículo usado, última lectura y periodos anteriores. | Ventas, créditos, caja, lecturas operativas y movimientos. |
+| `inicio_turno_pendiente` | Pulsar `Iniciar turno`, elegir vehículo y capturar lectura actual. | Toda operación hasta confirmar la lectura. |
+| `turno_activo` | Operar clientes, ventas, créditos, carrito y caja. | Cambiar vehículo, medidor, localidad o configuración. |
+| `cierre_pendiente` | Revisar resumen y capturar dos veces la lectura de cierre. | Nuevas ventas después de solicitar el cierre. |
+| `periodo_cerrado` | Consultar recibo e historial. | Cualquier modificación del periodo cerrado. |
+
+## 12. Flujo de inicio de turno
+
+### 12.1 Entrada inicial en modo lectura
+
+Al iniciar sesión después de un periodo cerrado, la pantalla principal mostrará una banda superior visible:
+
+```text
+MODO LECTURA
+Resumen disponible — operaciones bloqueadas
+
+[Iniciar turno]
+```
+
+La acción `Iniciar turno` debe estar en la parte superior de la pantalla principal, no escondida únicamente dentro de configuración. Esto reduce el riesgo de que el chofer intente vender sin haber confirmado la lectura del día. Un menú colapsable puede repetir la acción, pero no reemplaza el botón principal.
+
+En modo lectura se mostrarán:
+
+```text
+último periodo cerrado
+última lectura registrada
+vehículo de referencia
+resumen de garrafones
+contado comercial
+contado industrial
+crédito comercial
+crédito industrial
+efectivo operativo del periodo anterior
+```
+
+### 12.2 Selección del vehículo
+
+Al pulsar `Iniciar turno`, el sistema presenta los vehículos autorizados y activos para ese chofer. Si solo existe uno, puede aparecer preseleccionado, pero el chofer debe confirmarlo. El chofer nunca puede elegir un vehículo ajeno a su asignación administrativa.
+
+```text
+Selecciona tu vehículo
+[ Pipa 01 — Medidor M-001 ]
+
+[Regresar] [Continuar]
+```
+
+El sistema conserva la última lectura conocida del vehículo seleccionado como referencia.
+
+### 12.3 Captura de lectura actual
+
+Después de elegir vehículo, se solicita:
+
+```text
+Última lectura registrada: 10,500.00
+
+Lectura actual del vehículo:
+[                         ]
+
+[Regresar] [Confirmar lectura]
+```
+
+La lectura inicial de referencia del vehículo se asigna una sola vez en administración. Las capturas diarias no reemplazan esa referencia original; crean lecturas de inicio de día y mantienen la continuidad del historial.
+
+La validación recomendada es:
+
+```text
+lecturaActual >= ultimaLecturaConocida
+```
+
+Se permite igualdad si el vehículo no tuvo salida desde el último cierre. Si la lectura actual es menor, el sistema bloquea el inicio, muestra el desfase y solicita revisión administrativa o un motivo conforme al procedimiento aprobado. Una lectura mayor se acepta y se registra como inicio del nuevo periodo.
+
+### 12.4 Activación del turno
+
+Solo después de confirmar el vehículo y la lectura se crea el inicio de turno y se cambia el estado a `turno_activo`:
+
+```text
+inicio_turno
+  ├── choferUid
+  ├── vehiculoId
+  ├── medidorId
+  ├── lecturaReferenciaAnterior
+  ├── lecturaActualInicio
+  ├── periodoId
+  └── creadoEn
+```
+
+A partir de ese momento se habilitan las pantallas de clientes, ventas, crédito, carrito y caja. Si el usuario cierra la pestaña o pierde conexión, el estado local debe conservar el borrador, pero la activación definitiva depende de la confirmación persistida.
+
+## 13. Ciclo operativo de fecha, lectura y cierre de caja
 
 El medidor físico tiene una lectura inicial asignada una sola vez al vehículo o a la unidad operativa. Esa lectura es el punto de referencia histórico y no se vuelve a editar.
 
 La lectura no se cierra después de cada venta. Mientras el turno está abierto, el sistema muestra en el dashboard la última lectura física declarada, las lecturas asociadas a ventas industriales y una lectura operativa acumulada para que el chofer compare la información digital con lo que observa en el medidor.
 
-### 11.1 Inicio del día
+#### 13.1 Inicio del día
 
 Al abrir la app en un nuevo día operativo, el sistema solicita:
 
@@ -266,7 +362,7 @@ lectura_actual = [             ]
 
 La lectura se guarda como `lectura_inicio_dia` y se compara con la última referencia conocida. Si existe diferencia, el sistema muestra el desfase y exige motivo cuando corresponda; no modifica la lectura anterior.
 
-### 11.2 Durante las ventas
+#### 13.2 Durante las ventas
 
 Cada venta industrial puede registrar las lecturas necesarias para calcular litros y garrafones equivalentes, pero no cierra el medidor general del vehículo. El dashboard actualiza el resumen del chofer con:
 
@@ -279,7 +375,7 @@ garrafones equivalentes
 
 La lectura operativa esperada es un apoyo de memoria y detección de errores. No sustituye la lectura física de cierre.
 
-### 11.3 Cambio automático a las 23:59
+#### 13.3 Cambio automático a las 23:59
 
 A las 23:59 de la zona horaria configurada, el sistema cierra automáticamente el **periodo de fecha** para impedir que nuevas operaciones queden registradas con la fecha anterior. Este evento:
 
@@ -292,7 +388,7 @@ A las 23:59 de la zona horaria configurada, el sistema cierra automáticamente e
 
 El cierre automático de fecha no equivale al cierre confirmado de caja. Si el chofer todavía no realizó el cierre físico, administración verá el periodo como pendiente.
 
-### 11.4 Cierre manual de caja
+#### 13.4 Cierre manual de caja
 
 El cierre definitivo ocurre cuando el chofer entra a `Cerrar caja` y confirma la operación. El sistema solicita nuevamente:
 
@@ -305,11 +401,11 @@ La segunda captura evita errores de dedo. Si los valores no coinciden, no se per
 
 El cierre manual puede hacerse antes de las 23:59 por una necesidad operativa, por ejemplo un resumen de viernes o un corte al mediodía del sábado. Esto no representa nómina ni registra pagos al chofer; solo cierra el periodo operativo y de caja.
 
-### 11.5 Nuevo día después de un cierre
+#### 13.5 Nuevo día después de un cierre
 
 Cuando el chofer abre la app al día siguiente, debe declarar la lectura actual del medidor. El nuevo periodo conserva la continuidad del medidor y comienza con esa lectura como referencia. Nunca se reinicia físicamente el medidor desde cero.
 
-## 12. Colección `resumen_ventas_chofer`
+## 14. Colección `resumen_ventas_chofer`
 
 Ruta conceptual:
 
@@ -362,7 +458,7 @@ efectivoTotalARecibir =
 
 El crédito cuenta como venta y como unidades entregadas, pero no forma parte del efectivo que el chofer entrega al cierre.
 
-## 12. Colección `eventos_contador_ventas`
+## 15. Colección `eventos_contador_ventas`
 
 Ruta:
 
@@ -392,7 +488,7 @@ Esta colección conserva cada corte, conteo y reinicio.
 
 Todo reinicio exige motivo, usuario y fecha. Ningún evento se edita o elimina.
 
-## 13. Relación con ventas
+## 16. Relación con ventas
 
 Cada venta conserva su contexto:
 
@@ -419,7 +515,7 @@ Una venta comercial puede registrar la cantidad acordada. Una venta industrial p
 
 El contador no modifica ni borra la venta. Si el resumen se reconstruye, debe poder recalcularse desde las ventas y sus detalles.
 
-## 14. Botones dinámicos y acciones colapsables
+## 17. Botones dinámicos y acciones colapsables
 
 La interfaz tendrá una acción principal visible y acciones secundarias dentro de un menú de opciones. El menú debe mostrar solo acciones permitidas por rol y estado.
 
@@ -438,7 +534,7 @@ La interfaz tendrá una acción principal visible y acciones secundarias dentro 
 
 Los tres puntos u otra acción colapsable no son un permiso. Las reglas de Firestore deben validar el rol y el estado aunque el botón no se muestre.
 
-## 15. Pantallas administrativas
+## 18. Pantallas administrativas
 
 ### 15.1 Vehículos y medidores
 
@@ -470,7 +566,7 @@ Vista inmutable de cortes diarios, semanales y manuales, con usuario, motivo, co
 
 Muestra los tickets y operaciones que forman un resumen. No permite editar el detalle desde el resumen.
 
-## 16. Pantalla del chofer
+## 19. Pantalla del chofer
 
 El chofer verá en su pantalla principal:
 
@@ -488,7 +584,7 @@ efectivo total a recibir
 
 No podrá elegir el modo, reiniciar el contador ni cambiar el periodo. Esas acciones pertenecen a administración. El chofer sí puede abrir el detalle de sus propias ventas autorizadas.
 
-## 17. Reglas de acceso conceptuales
+## 20. Reglas de acceso conceptuales
 
 ```text
 vehiculos y medidores
@@ -524,7 +620,7 @@ eventos_contador_ventas
 
 Ocultar acciones dinámicas no es seguridad. Las reglas deben impedir que un chofer modifique el modo, reinicie su contador o lea resúmenes de otro chofer.
 
-## 18. Auditoría transversal
+## 21. Auditoría transversal
 
 Colección conceptual:
 
@@ -550,7 +646,7 @@ Debe registrar:
 
 También se respaldan en `eventos_contador_ventas` los conteos y reinicios operativos. Todo admin genera auditoría, sin excepciones.
 
-## 19. Estados de pantalla
+## 22. Estados de pantalla
 
 | Estado | Comportamiento |
 |---|---|
@@ -565,7 +661,7 @@ También se respaldan en `eventos_contador_ventas` los conteos y reinicios opera
 | Duplicado | Un reintento no crea un segundo reinicio. |
 | Sin ventas | Muestra cero sin fabricar movimientos. |
 
-## 20. Criterios de aceptación
+## 23. Criterios de aceptación
 
 1. El inventario de agua no bloquea ventas por existencia física.
 2. El administrador puede configurar conteo diario, semanal o manual.
@@ -589,15 +685,17 @@ También se respaldan en `eventos_contador_ventas` los conteos y reinicios opera
 20. La aplicación no calcula ni registra nómina, comisiones o pagos al chofer.
 15. Un reintento idempotente no duplica ventas, cortes ni reinicios.
 
-## 21. Fuera de alcance
+## 24. Fuera de alcance
 
 Este módulo no define todavía el catálogo completo de productos, precios, clientes, ventas detalladas, créditos, notas PDF, reportes Excel ni la implementación concreta de persistencia offline. Esos módulos utilizarán el periodo y contador definidos aquí.
 
-## 22. Decisiones pendientes
+## 25. Decisiones pendientes
 
 Antes de implementar deben confirmarse:
 
 1. Confirmar la zona horaria exacta que gobernará el cambio automático de las 23:59.
+2. Confirmar si el chofer puede tener más de un vehículo activo disponible o si siempre habrá uno único.
+3. Confirmar si una lectura actual igual a la anterior debe permitir iniciar turno, como está propuesto aquí.
 2. Confirmar si un cierre manual antes de las 23:59 abre inmediatamente un nuevo periodo operativo o requiere una nueva lectura actual.
 3. Confirmar si el conteo manual solicita solo reinicio o también captura de conteo observado.
 4. Confirmar si el contador debe incluir todos los productos vendidos o solo garrafones de agua.
