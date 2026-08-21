@@ -5,7 +5,7 @@
 **Versión:** 1.0
 **Alcance:** interfaz y navegación; no autoriza todavía cambios de código ni creación de colecciones
 
-> La pantalla debe reflejar la relación física real: cada tambo es una unidad independiente; un cliente comercial puede tener como máximo uno y un cliente industrial puede tener varios. Las devoluciones son operaciones foliadas y el archivado exige que no queden tambos asignados.
+> La pantalla debe reflejar la relación física real: el identificador operativo principal es el folio o identificador físico del tambo. Cada tambo es una unidad independiente ligada a un cliente, una localidad y, por la asignación territorial, a un chofer. Un cliente comercial puede tener como máximo uno y un cliente industrial puede tener varios. Las devoluciones son operaciones foliadas y el archivado exige que no queden tambos asignados. El QR único por cliente es una función opcional controlada desde Configuración.
 
 ## 1. Principios de interfaz
 
@@ -40,7 +40,7 @@ Nueva venta | Clientes | Créditos | Cerrar turno
 Devoluciones reportadas | solicitudes de alta | incidencias
 ```
 
-El chofer solo ve clientes de sus localidades asignadas. No ve activos, clientes ni devoluciones de otra cartera.
+El chofer solo ve clientes de sus localidades asignadas. La identificación principal en campo es el identificador o folio físico del tambo. No ve activos, clientes ni devoluciones de otra cartera. El QR no sustituye al identificador físico: solo se muestra si la configuración global `qrClienteHabilitado` está activa.
 
 ## 3. Ficha del cliente dentro de Chofer
 
@@ -48,11 +48,13 @@ Al abrir un cliente, la ficha debe mostrar primero la información necesaria par
 
 ```text
 Cliente: nombre o razón social
-Código de localidad: MOC001
+Identificador del tambo: TMB-001
+Código de cliente: MOC001
 Localidad: Mochomera
 Tipo: Comercial | Industrial
 Tarifa vigente
 Teléfono
+QR de cliente: disponible solo si está habilitado en Configuración
 
 Activos prestados
   TMB-001 | 250 L | adherido
@@ -67,7 +69,7 @@ El chofer podrá consultar el activo y registrar una devolución física reporta
 
 ## 4. Flujo de devolución desde Chofer
 
-El botón `Registrar devolución` abre un modal, no una pantalla que pierda el contexto del cliente.
+El botón `Registrar devolución` abre un modal, no una pantalla que pierda el contexto del cliente. El modal debe identificar primero el tambo por su folio o código físico. El escaneo QR del cliente es opcional y solo aparece cuando `qrClienteHabilitado = true`. Si el QR está desactivado, se ocultan el botón y el lector QR, y se conserva la búsqueda manual por identificador del tambo.
 
 ### Cliente comercial
 
@@ -83,6 +85,7 @@ Registrar observaciones
 ```text
 Seleccionar uno o varios tambos a devolver
 Cada tambo aparece como una fila independiente
+Identificar cada unidad por folio o código físico
 Confirmar código físico de cada unidad
 Registrar observaciones por unidad
 [Generar folios de devolución]
@@ -203,7 +206,8 @@ Para un cliente industrial, devolver uno de varios tambos no habilita el archiva
 | Ver cliente | Detalle de cliente | `clientes`, `activos_tambos`, `asignaciones_localidades` | Ninguna | Admin o chofer con alcance |
 | Solicitar alta | Modal de solicitud | `localidades` | `solicitudes_alta_clientes` | Chofer |
 | Asignar tambo | Detalle de cliente | `clientes`, `activos_tambos` | Cliente, activo, movimiento y auditoría mediante operación autorizada | Admin |
-| Registrar devolución | Modal de devolución | Cliente y activos propios | `devoluciones_tambos`, movimiento y auditoría | Chofer o vendedor autorizado |
+| Registrar devolución | Modal de devolución | Cliente, localidad y activos propios | `devoluciones_tambos`, movimiento y auditoría | Chofer o vendedor autorizado |
+| Identificar con QR | Modal de identificación opcional | `clientes`, QR habilitado en configuración | Ninguna | Chofer, solo si `qrClienteHabilitado = true` |
 | Validar devolución | Panel de devoluciones | `devoluciones_tambos`, activo y cliente | Estado de devolución, activo, cliente, movimiento y auditoría | Admin |
 | Agregar tambo industrial | Detalle de cliente | Cliente y activos disponibles | Cliente, activo, movimiento y auditoría | Admin |
 | Archivar cliente | Detalle de cliente | Cliente y activos adheridos | Estado del cliente y auditoría | Admin, solo sin activos |
@@ -225,5 +229,7 @@ Cuando no haya conexión, la pantalla puede conservar un borrador local de la de
 6. La pantalla impide visualmente intentar archivar un cliente con activos asignados.
 7. El administrador puede consultar el historial de cada tambo sin mezclarlo con el historial de otro.
 8. El código del cliente y el código físico del tambo aparecen como identificadores distintos.
-9. No se muestran mapas ni GPS en estas pantallas.
-10. No se modifica código hasta aprobar esta propuesta.
+9. El identificador principal de campo es el folio o código físico del tambo.
+10. El QR por cliente aparece únicamente cuando Configuración lo habilita; apagado, no se muestra el botón ni el modal QR.
+11. No se muestran mapas ni GPS en estas pantallas.
+12. No se modifica código hasta aprobar esta propuesta.
