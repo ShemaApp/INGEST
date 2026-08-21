@@ -8,7 +8,7 @@
 
 ## 1. Objetivo
 
-El módulo administra los vehículos operativos, sus medidores físicos y un contador de ventas de garrafones por chofer. El administrador define cómo se acumulan los totales; el chofer opera con su vehículo, medidor, localidad y clientes asignados.
+El módulo administra los vehículos operativos, sus medidores físicos y un contador de ventas de garrafones exclusivamente por chofer. El administrador define el modo de conteo para situaciones operativas, como un resumen parcial de viernes o un cierre al mediodía del sábado; este módulo no calcula nómina, comisiones ni pagos al chofer. El chofer opera con su vehículo, medidor, localidad y clientes asignados.
 
 El inventario de agua no debe bloquear una venta por saldo físico. En esta etapa, el concepto de inventario significa **control histórico y operativo de garrafones vendidos**, no una bodega que impida vender porque el saldo llegue a cero.
 
@@ -198,10 +198,10 @@ configuracion_contadores/{configuracionId}
 
 | Campo | Tipo | Obligatorio | Descripción |
 |---|---|---:|---|
-| `alcance` | enum | Sí | `global`, `porChofer` o `porVehiculo`. |
-| `choferUid` | string/null | Condicional | Chofer al que aplica. |
-| `vehiculoId` | string/null | Condicional | Vehículo al que aplica. |
-| `modo` | enum | Sí | `diario`, `semanal` o `manual`. |
+| `alcance` | enum | Sí | Siempre `porChofer`; el vehículo solo se conserva como contexto histórico. |
+| `choferUid` | string | Sí | Chofer al que aplica. |
+| `vehiculoId` | string/null | No | Contexto actual; no define el propietario del contador. |
+| `modo` | enum | Sí | `diario`, `semanal` o `manual`; el modo manual permite cortes operativos en cualquier fecha u hora. |
 | `diaInicioSemana` | number/null | Condicional | Día de inicio si el modo es semanal. |
 | `zonaHoraria` | string | Sí | Zona usada para cortar el día. |
 | `reinicioAutomatico` | boolean | Sí | Si el periodo reinicia automáticamente. |
@@ -210,13 +210,15 @@ configuracion_contadores/{configuracionId}
 | `configuradoEn` | timestamp | Sí | Fecha de configuración. |
 | `motivoCambio` | string/null | Condicional | Obligatorio cuando reemplaza una configuración anterior. |
 
-La configuración nunca debe cambiar silenciosamente un periodo ya cerrado. Al cambiar de diario a semanal, la configuración anterior se conserva en historial y la nueva inicia un periodo claramente identificado.
+La configuración nunca debe cambiar silenciosamente un periodo ya cerrado. Al cambiar el modo de conteo, la configuración anterior se conserva en historial y la nueva inicia un periodo claramente identificado. El modo no representa nómina ni pago: solo define cómo se agrupan las ventas y cuándo se genera un resumen operativo.
 
 ## 10. Modos de conteo
 
 ### 10.1 Diario
 
-El sistema agrupa las ventas del chofer por fecha operativa y zona horaria configurada.
+El conteo diario se organiza por chofer y fecha operativa. A las 23:59 se congela el resumen de la fecha, pero el periodo solo queda definitivamente cerrado cuando el chofer confirma el cierre de caja y la lectura física de cierre.
+
+El sistema agrupa las ventas del chofer por fecha operativa y zona horaria configurada. No se agrupa por vehículo como propietario del contador; el vehículo queda como contexto de las operaciones.
 
 ```text
 periodoId = choferUid + fechaLocal
@@ -236,7 +238,7 @@ El administrador define el primer día de la semana y la zona horaria. El conteo
 
 ### 10.3 Manual
 
-El administrador controla el periodo. Puede:
+El administrador controla el periodo. Puede solicitar un resumen operativo en cualquier momento, pero esa acción no registra nómina ni pago al chofer. Puede:
 
 - solicitar un conteo actual;
 - confirmar el número observado;
@@ -247,7 +249,67 @@ El administrador controla el periodo. Puede:
 
 Un reinicio manual no elimina ventas. Crea un evento de corte y hace que las ventas posteriores pertenezcan a un nuevo periodo.
 
-## 11. Colección `resumen_ventas_chofer`
+## 11. Ciclo operativo de fecha, lectura y cierre de caja
+
+El medidor físico tiene una lectura inicial asignada una sola vez al vehículo o a la unidad operativa. Esa lectura es el punto de referencia histórico y no se vuelve a editar.
+
+La lectura no se cierra después de cada venta. Mientras el turno está abierto, el sistema muestra en el dashboard la última lectura física declarada, las lecturas asociadas a ventas industriales y una lectura operativa acumulada para que el chofer compare la información digital con lo que observa en el medidor.
+
+### 11.1 Inicio del día
+
+Al abrir la app en un nuevo día operativo, el sistema solicita:
+
+```text
+lectura_actual = [             ]
+[Confirmar lectura]
+```
+
+La lectura se guarda como `lectura_inicio_dia` y se compara con la última referencia conocida. Si existe diferencia, el sistema muestra el desfase y exige motivo cuando corresponda; no modifica la lectura anterior.
+
+### 11.2 Durante las ventas
+
+Cada venta industrial puede registrar las lecturas necesarias para calcular litros y garrafones equivalentes, pero no cierra el medidor general del vehículo. El dashboard actualiza el resumen del chofer con:
+
+```text
+última lectura confirmada
+lectura operativa esperada
+litros registrados
+garrafones equivalentes
+```
+
+La lectura operativa esperada es un apoyo de memoria y detección de errores. No sustituye la lectura física de cierre.
+
+### 11.3 Cambio automático a las 23:59
+
+A las 23:59 de la zona horaria configurada, el sistema cierra automáticamente el **periodo de fecha** para impedir que nuevas operaciones queden registradas con la fecha anterior. Este evento:
+
+- congela el resumen del día;
+- marca el periodo como `pendiente_cierre` si la caja todavía no fue cerrada;
+- registra un evento auditado de cambio de fecha;
+- no borra ventas ni créditos;
+- no genera por sí solo el recibo final de caja;
+- no inventa una lectura física de cierre.
+
+El cierre automático de fecha no equivale al cierre confirmado de caja. Si el chofer todavía no realizó el cierre físico, administración verá el periodo como pendiente.
+
+### 11.4 Cierre manual de caja
+
+El cierre definitivo ocurre cuando el chofer entra a `Cerrar caja` y confirma la operación. El sistema solicita nuevamente:
+
+```text
+lectura_cierre = [             ]
+confirmar_lectura_cierre = [   ]
+```
+
+La segunda captura evita errores de dedo. Si los valores no coinciden, no se permite confirmar. Después de confirmar, se crea el recibo inmutable con el resumen de ventas, créditos, efectivo, vehículo, clientes atendidos, lectura inicial y lectura final.
+
+El cierre manual puede hacerse antes de las 23:59 por una necesidad operativa, por ejemplo un resumen de viernes o un corte al mediodía del sábado. Esto no representa nómina ni registra pagos al chofer; solo cierra el periodo operativo y de caja.
+
+### 11.5 Nuevo día después de un cierre
+
+Cuando el chofer abre la app al día siguiente, debe declarar la lectura actual del medidor. El nuevo periodo conserva la continuidad del medidor y comienza con esa lectura como referencia. Nunca se reinicia físicamente el medidor desde cero.
+
+## 12. Colección `resumen_ventas_chofer`
 
 Ruta conceptual:
 
@@ -274,7 +336,10 @@ El resumen es una vista operativa acumulada por periodo; no reemplaza el histori
   efectivoTotalARecibir,
   lecturaInicialPeriodo: null,
   lecturaFinalPeriodo: null,
-  estado: "abierto" | "cerrado" | "reiniciado",
+  estado: "abierto" | "pendiente_cierre" | "cerrado" | "reiniciado",
+  tipoCierre: "automatico_fecha" | "manual_caja" | null,
+  lecturaInicioDia: null,
+  lecturaCierre: null,
   creadoEn,
   actualizadoEn,
   ultimaOperacionId
@@ -516,6 +581,12 @@ También se respaldan en `eventos_contador_ventas` los conteos y reinicios opera
 12. Los botones secundarios son colapsables, pero las reglas no dependen de ocultarlos.
 13. El contador no mezcla choferes, vehículos ni periodos.
 14. Los movimientos y lecturas históricas no se editan ni eliminan.
+15. El contador pertenece al chofer, aunque el vehículo cambie.
+16. La lectura inicial del vehículo se asigna una sola vez y queda auditada.
+17. A las 23:59 se congela la fecha operativa sin fabricar una lectura de cierre.
+18. El cierre de medidor solo se confirma dentro del cierre de caja.
+19. El cierre solicita dos capturas coincidentes de la lectura física.
+20. La aplicación no calcula ni registra nómina, comisiones o pagos al chofer.
 15. Un reintento idempotente no duplica ventas, cortes ni reinicios.
 
 ## 21. Fuera de alcance
@@ -526,10 +597,10 @@ Este módulo no define todavía el catálogo completo de productos, precios, cli
 
 Antes de implementar deben confirmarse:
 
-1. Si el modo de conteo se configura por chofer o por vehículo como regla principal.
-2. Qué día comienza la semana y qué zona horaria se utilizará.
-3. Si el conteo manual solicita solo reinicio o también captura de conteo observado.
-4. Si el contador debe incluir todos los productos vendidos o solo garrafones de agua.
-5. Si el resumen separará también comercial e industrial por localidad.
+1. Confirmar la zona horaria exacta que gobernará el cambio automático de las 23:59.
+2. Confirmar si un cierre manual antes de las 23:59 abre inmediatamente un nuevo periodo operativo o requiere una nueva lectura actual.
+3. Confirmar si el conteo manual solicita solo reinicio o también captura de conteo observado.
+4. Confirmar si el contador debe incluir todos los productos vendidos o solo garrafones de agua.
+5. Confirmar si el resumen separará también comercial e industrial por localidad.
 
 No se implementará código hasta aprobar estas decisiones.
