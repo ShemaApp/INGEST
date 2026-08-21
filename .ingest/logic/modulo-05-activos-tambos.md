@@ -370,3 +370,122 @@ La eliminación física de `clientes/{clienteId}`, `activos_tambos/{activoId}` y
 6. Un tambo disponible no contiene `clienteId` ni `localidadId` vigentes.
 7. El sistema nunca crea un nuevo tambo automáticamente por cambiar de localidad.
 8. La capacidad del tambo permanece asociada al activo y se copia en la relación del cliente para consulta rápida.
+
+
+# Enmienda aprobada — Folio de devolución y bloqueo de archivado
+
+## 23. Folio obligatorio de devolución
+
+Toda devolución de tambo debe crear un expediente con un folio único, permanente e inmutable. No existe devolución válida sin folio.
+
+Colección conceptual:
+
+```text
+devoluciones_tambos/{devolucionId}
+```
+
+Campos mínimos:
+
+```text
+folioDevolucion
+activoId
+codigoFisico
+capacidadLitros
+modelo
+clienteId
+localidadId
+reportadoPorUid
+recibidoPorUid
+fechaEntregaFisica
+fechaRecepcion
+estado: reportada | recibida | validada | rechazada | en_revision
+motivo
+observacionesFisicas
+creadoEn
+validadoEn
+validadoPorUid
+```
+
+El folio puede tener un formato configurable, por ejemplo `DEV-2026-000001`, pero debe ser único y no reutilizarse. El `devolucionId` técnico y el `folioDevolucion` operativo quedan vinculados.
+
+El folio debe mostrarse en la confirmación, en el historial del cliente, en el historial del activo y en los reportes administrativos. Una devolución rechazada conserva su folio y no libera el tambo.
+
+## 24. Archivado condicionado del cliente
+
+Está prohibido archivar un cliente mientras tenga un tambo asignado en `clientes.activoTamboId` o mientras exista un activo en estado `adherido` con `clienteId` igual al cliente.
+
+El flujo obligatorio es:
+
+```text
+Cliente activo con tambo
+        ↓
+Crear devolución con folio
+        ↓
+Recibir y revisar tambo
+        ↓
+Validar devolución
+        ↓
+Desvincular tambo del cliente
+        ↓
+Confirmar que no existe activo adherido
+        ↓
+Archivar cliente
+```
+
+La validación debe comprobar en una transacción que:
+
+1. la devolución existe y pertenece al cliente;
+2. tiene folio único;
+3. el activo y el código físico coinciden;
+4. la devolución está en estado validable;
+5. el activo pasa a `disponible` o `en_revision`;
+6. el cliente queda sin `activoTamboId`;
+7. no queda otro tambo adherido al cliente;
+8. el cliente puede pasar posteriormente a `archivado`.
+
+Si falta cualquiera de estas condiciones, el botón `Archivar cliente` debe bloquearse y Firestore debe rechazar la operación aunque alguien intente invocarla directamente.
+
+## 25. Estados y botones actualizados
+
+| Situación | Acción permitida |
+|---|---|
+| Cliente con tambo asignado | `Crear devolución`; `Archivar cliente` bloqueado. |
+| Devolución reportada | Esperar recepción y validación; no archivar. |
+| Devolución rechazada | Corregir incidencia o generar nueva acción autorizada; no archivar. |
+| Devolución en revisión | Resolver físicamente la incidencia; no archivar. |
+| Devolución validada | Desvincular tambo y permitir archivado. |
+| Cliente sin tambo | Archivar si se cumplen las demás reglas administrativas. |
+| Tambo disponible | Puede asignarse a otro cliente mediante una nueva operación. |
+
+## 26. Reglas de Firestore actualizadas
+
+```text
+devoluciones_tambos
+  creación: usuario operativo autorizado
+  lectura: admin; usuarios con alcance sobre cliente o activo
+  validación: admin
+  actualización/eliminación: prohibidas
+
+clientes
+  archivado: permitido solo si activoTamboId == null
+  archivado: rechazado si existe activo adherido al cliente
+  limpieza de activoTamboId: solo como parte de devolución validada
+
+activos_tambos
+  estado disponible: clienteId == null y localidadId == null
+  estado adherido: clienteId y localidadId obligatorios
+  transición adherido → disponible: solo mediante devolución con folio validada
+```
+
+La aplicación no debe ofrecer `Eliminar cliente`; debe ofrecer `Archivar cliente` y mostrar el folio de devolución que permitió liberar el activo cuando corresponda.
+
+## 27. Criterios adicionales de aceptación
+
+1. Cada devolución tiene un folio único, visible e inmutable.
+2. No se puede validar una devolución sin identificar el tambo físico.
+3. Una devolución rechazada o en revisión no libera el tambo.
+4. No se puede archivar un cliente con `activoTamboId` vigente.
+5. No se puede archivar un cliente si Firestore detecta un tambo adherido, aunque el documento del cliente haya sido manipulado.
+6. Primero se valida la devolución; después se desvincula el activo; finalmente se archiva el cliente.
+7. El tambo conserva su unidad, código físico, capacidad e historial al archivarse el cliente.
+8. El tambo liberado puede asignarse a un cliente nuevo sin duplicar el activo.
