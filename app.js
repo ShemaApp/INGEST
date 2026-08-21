@@ -1,10 +1,13 @@
 import { authErrorMessage, loginWithPassword, logout, observeSession } from './auth-client.js';
+import { loadGeneralConfiguration, saveGeneralConfiguration } from './data-client.js';
 
 const app = document.querySelector('#app');
 let currentUser = null;
 let authLoading = true;
 let loginMessage = '';
 let loginBusy = false;
+let configurationReady = false;
+let configurationError = '';
 
 const state = {
   view: 'inicio',
@@ -75,9 +78,29 @@ function renderAudit() {
   shell(`${pageHeader('TRAZABILIDAD', 'Auditoría', 'Registro de cambios administrativos y decisiones sobre activos y folios.', action('Exportar consulta', 'refresh', 'btn-quiet'))}${toolbar('Buscar por usuario, entidad, folio o acción')}<section class="panel table-panel"><div class="table-meta"><b>48</b> eventos recientes <span>Los eventos son de solo lectura.</span></div><div class="activity"><div><b>Devolución validada</b><small>DEV-2026-000017 · TMB-0006 pasó a disponible</small><span>Administrador · Hoy 11:04</span>${status('Validada')}</div><div><b>Configuración actualizada</b><small>Se modificó una opción operativa</small><span>Administrador · Hoy 10:16</span>${status('Completado')}</div><div><b>Cliente industrial creado</b><small>MOC025 · 3 tambos asignados</small><span>Administrador · Hoy 09:18</span>${status('Completado')}</div></div></section>`);
 }
 
+async function persistConfiguration() {
+  const keys = ['qrClienteHabilitado', 'jornadaObligatoria', 'cierreAutomatico', 'permitirOffline', 'solicitudesChofer', 'multiplesTambosIndustriales'];
+  const changedKeys = keys.filter(key => state[key] !== (state.savedSettings?.[key] ?? false));
+  const values = Object.fromEntries(changedKeys.map(key => [key, state[key]]));
+  const saveButton = document.querySelector('[data-action="save-config"]');
+  if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Guardando…'; }
+  try {
+    await saveGeneralConfiguration({ values, changedKeys, actor: currentUser });
+    state.savedSettings = { ...(state.savedSettings || {}), ...values };
+    configurationError = '';
+    document.querySelector('.modal-backdrop')?.remove();
+    toast('Configuración guardada y auditada');
+    render();
+  } catch (error) {
+    configurationError = error?.code === 'permission-denied' ? 'Firebase rechazó la escritura. Confirma que tu perfil tenga rol admin y que las reglas estén desplegadas.' : 'No se pudo guardar la configuración. Revisa la conexión e inténtalo de nuevo.';
+    document.querySelector('.modal-backdrop')?.remove();
+    render();
+  }
+}
+
 function renderConfig() {
   const sw = (key, label, text, locked = false) => `<div class="setting"><div><b>${label}${locked ? '<small class="locked">Control protegido</small>' : ''}</b><p>${text}</p></div><label class="switch"><input type="checkbox" data-setting="${key}" ${state[key] ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label></div>`;
-  shell(`${pageHeader('CONTROL DEL SISTEMA', 'Configuración general', 'Administra funciones opcionales sin alterar registros históricos ni reglas de seguridad.', action('Guardar cambios', 'save-settings', 'btn-primary'))}<div class="settings-layout"><aside class="settings-nav"><b>Configuración</b><button class="selected">Operación</button><button>Identificación</button><button>Clientes</button><button>Medidores y ventas</button><button>Devoluciones y tambos</button><button>Notificaciones</button><button>Seguridad</button></aside><div class="settings-main"><div class="config-status"><span>✓</span><div><b>Configuración sincronizada</b><small>Última actualización: hoy a las 10:16 · Administrador</small></div><button data-action="config-history">Ver historial</button></div><section class="settings-section"><p class="eyebrow">OPERACIÓN</p><h2>Comportamiento de la jornada</h2><p class="section-copy">Estas opciones definen qué puede hacer un usuario durante un turno.</p>${sw('jornadaObligatoria', 'Jornada obligatoria antes de operar', 'Impide ventas y devoluciones sin turno abierto', true)}${sw('cierreAutomatico', 'Cierre automático de jornada', 'Cierra operaciones abiertas al cambio de día')}${sw('permitirOffline', 'Permitir operación offline', 'Conserva operaciones pendientes para sincronizarlas después')}</section><section class="settings-section"><p class="eyebrow">IDENTIFICACIÓN</p><h2>Folio físico y QR opcional</h2><p class="section-copy">El identificador principal siempre es el folio o código físico del tambo.</p><div class="qr-setting"><div><b>QR único por cliente</b><p>Activa una vía adicional de identificación rápida. No sustituye el folio físico.</p></div><label class="switch large"><input type="checkbox" data-setting="qrClienteHabilitado" ${state.qrClienteHabilitado ? 'checked' : ''}><span></span></label></div><div class="fixed-rule">Regla fija <b>El folio del tambo continúa siendo la referencia operativa principal.</b></div></section><section class="settings-section"><p class="eyebrow">CLIENTES Y TAMBOS</p><h2>Reglas de asignación</h2><p class="section-copy">La configuración no puede romper los límites por tipo de cliente.</p>${sw('solicitudesChofer', 'Solicitudes de alta por chofer', 'El chofer solicita; administración aprueba')}${sw('multiplesTambosIndustriales', 'Múltiples tambos industriales', 'Solo aplica a industriales; comerciales conservan máximo uno')}</section></div></div>`);
+  shell(`${pageHeader('CONTROL DEL SISTEMA', 'Configuración general', 'Administra funciones opcionales sin alterar registros históricos ni reglas de seguridad.', action('Guardar cambios', 'save-settings', 'btn-primary'))}<div class="settings-layout"><aside class="settings-nav"><b>Configuración</b><button class="selected">Operación</button><button>Identificación</button><button>Clientes</button><button>Medidores y ventas</button><button>Devoluciones y tambos</button><button>Notificaciones</button><button>Seguridad</button></aside><div class="settings-main">${configurationError ? `<div class="login-error" role="alert">${configurationError}</div>` : ''}<div class="config-status"><span>✓</span><div><b>Configuración sincronizada</b><small>Última actualización: hoy a las 10:16 · Administrador</small></div><button data-action="config-history">Ver historial</button></div><section class="settings-section"><p class="eyebrow">OPERACIÓN</p><h2>Comportamiento de la jornada</h2><p class="section-copy">Estas opciones definen qué puede hacer un usuario durante un turno.</p>${sw('jornadaObligatoria', 'Jornada obligatoria antes de operar', 'Impide ventas y devoluciones sin turno abierto', true)}${sw('cierreAutomatico', 'Cierre automático de jornada', 'Cierra operaciones abiertas al cambio de día')}${sw('permitirOffline', 'Permitir operación offline', 'Conserva operaciones pendientes para sincronizarlas después')}</section><section class="settings-section"><p class="eyebrow">IDENTIFICACIÓN</p><h2>Folio físico y QR opcional</h2><p class="section-copy">El identificador principal siempre es el folio o código físico del tambo.</p><div class="qr-setting"><div><b>QR único por cliente</b><p>Activa una vía adicional de identificación rápida. No sustituye el folio físico.</p></div><label class="switch large"><input type="checkbox" data-setting="qrClienteHabilitado" ${state.qrClienteHabilitado ? 'checked' : ''}><span></span></label></div><div class="fixed-rule">Regla fija <b>El folio del tambo continúa siendo la referencia operativa principal.</b></div></section><section class="settings-section"><p class="eyebrow">CLIENTES Y TAMBOS</p><h2>Reglas de asignación</h2><p class="section-copy">La configuración no puede romper los límites por tipo de cliente.</p>${sw('solicitudesChofer', 'Solicitudes de alta por chofer', 'El chofer solicita; administración aprueba')}${sw('multiplesTambosIndustriales', 'Múltiples tambos industriales', 'Solo aplica a industriales; comerciales conservan máximo uno')}</section></div></div>`);
 }
 
 function renderLogin() {
@@ -118,8 +141,14 @@ function bind() {
     if (name === 'new-client') return modal('Nuevo cliente', '<div class="form-grid"><label>Tipo<select><option>Industrial</option><option>Comercial</option></select></label><label>Nombre o razón social<input placeholder="Ej. Empacadora del Valle"></label><label>Localidad<select><option>Mochomera</option><option>Rosario</option></select></label><label>RFC<input placeholder="RFC del cliente"></label></div><div class="fixed-rule">Industrial puede tener múltiples tambos. Comercial máximo uno.</div>', action('Cancelar', 'close', 'btn-quiet') + action('Crear cliente', 'preview', 'btn-primary'));
     if (name === 'new-tank') return modal('Registrar nuevo tambo', '<div class="form-grid"><label>Código físico<input placeholder="TMB-0007"></label><label>Capacidad<select><option>250 L</option><option>600 L</option><option>750 L</option><option>1,100 L</option><option>2,500 L</option></select></label><label>Modelo<input placeholder="Estándar"></label></div>', action('Cancelar', 'close', 'btn-quiet') + action('preview', 'preview', 'btn-primary'));
     if (name === 'client' || name === 'tank' || name === 'return') return modal(name === 'return' ? `Folio ${id}` : `Detalle ${id}`, `<div class="detail-note"><b>Vista de demostración</b><p>La operación real consultará Firestore y aplicará el alcance administrativo correspondiente.</p><p>La identidad física del tambo y su historial no se pueden editar ni eliminar.</p></div>`, action('Cerrar', 'close', 'btn-primary'));
-    if (name === 'save-settings') return modal('Confirmar cambios', '<div class="detail-note"><b>Se guardarán únicamente las opciones modificadas.</b><p>El cambio será registrado en la auditoría y no afectará operaciones históricas.</p></div>', action('Cancelar', 'close', 'btn-quiet') + action('Confirmar y guardar', 'preview', 'btn-primary'));
+    if (name === 'save-settings') {
+      const keys = ['qrClienteHabilitado', 'jornadaObligatoria', 'cierreAutomatico', 'permitirOffline', 'solicitudesChofer', 'multiplesTambosIndustriales'];
+      const changedKeys = keys.filter(key => state[key] !== (state.savedSettings?.[key] ?? false));
+      if (!changedKeys.length) return toast('No hay cambios pendientes');
+      return modal('Confirmar cambios', `<div class="detail-note"><b>Se guardarán ${changedKeys.length} opción(es).</b><p>El cambio se registrará en una auditoría inmutable. No se modifican ventas, clientes ni historiales.</p></div>`, action('Cancelar', 'close', 'btn-quiet') + action('save-config', 'save-config', 'btn-primary'));
+    }
     if (name === 'config-history') return modal('Historial de configuración', '<div class="history"><b>QR por cliente</b><span>Desactivado · Administrador · hoy 10:16</span></div><div class="history"><b>Margen de lectura</b><span>5 dígitos · Administrador · ayer 18:42</span></div>');
+    if (name === 'save-config') return persistConfiguration();
     if (name === 'preview') { document.querySelector('.modal-backdrop')?.remove(); return toast('Vista preparada para conectar con Firestore'); }
     if (name === 'logout') return logout();
     if (name === 'refresh') return toast('Información actualizada');
@@ -130,9 +159,32 @@ function bind() {
   document.querySelectorAll('[data-setting]').forEach(input => input.onchange = event => { state[event.target.dataset.setting] = event.target.checked; toast('Cambio guardado como borrador local'); });
   document.querySelectorAll('[data-search]').forEach(input => input.oninput = event => { const term = event.target.value.toLowerCase(); document.querySelectorAll('[data-row]').forEach(row => row.hidden = !row.dataset.row.toLowerCase().includes(term)); });
 }
-observeSession(user => {
+observeSession(async user => {
   currentUser = user;
   authLoading = false;
   loginBusy = false;
+  configurationError = '';
+  if (user) {
+    try {
+      const remote = await loadGeneralConfiguration();
+      const defaults = {
+        qrClienteHabilitado: false,
+        jornadaObligatoria: true,
+        cierreAutomatico: true,
+        permitirOffline: true,
+        solicitudesChofer: true,
+        multiplesTambosIndustriales: true
+      };
+      const loaded = { ...defaults, ...(remote || {}) };
+      Object.assign(state, loaded);
+      state.savedSettings = { ...loaded };
+      configurationReady = true;
+    } catch (error) {
+      configurationError = error?.code === 'permission-denied' ? 'Tu cuenta inició sesión, pero no tiene permiso para leer la configuración administrativa.' : 'No se pudo cargar la configuración general.';
+    }
+  } else {
+    configurationReady = false;
+    state.savedSettings = undefined;
+  }
   render();
 });
