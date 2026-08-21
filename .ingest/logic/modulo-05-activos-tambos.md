@@ -275,3 +275,98 @@ Este módulo no controla litros de agua, producción, ventas, caja, nómina, rut
 4. Confirmar los modelos comerciales de tambo, además de la capacidad en litros.
 
 No se implementará código ni se crearán colecciones reales hasta aprobar estas decisiones.
+
+
+# Enmienda aprobada — Identidad unitaria y archivado del cliente
+
+Esta enmienda sustituye cualquier redacción anterior que pudiera interpretarse como eliminación del tambo junto con el cliente.
+
+## 17. Identidad unitaria del tambo
+
+El tambo es un activo físico individual de la empresa. Su `activoId`, `codigoFisico`, capacidad y modelo permanecen durante toda su vida útil. El sistema debe garantizar que un mismo tambo no tenga dos clientes adheridos simultáneamente.
+
+La relación correcta es:
+
+```text
+un tambo físico → cero o un cliente activo
+un cliente activo → cero o un tambo adherido
+```
+
+La capacidad del tambo no crea copias ni unidades virtuales. Dos tambos de 250 L son dos activos diferentes, aunque compartan el mismo modelo y capacidad.
+
+## 18. Reasignación entre clientes
+
+Cuando un cliente devuelve el tambo, se cierra la relación anterior. Después de validar la devolución, el activo queda disponible y puede adherirse a un cliente nuevo. La reasignación nunca reutiliza el expediente anterior ni sobrescribe el historial.
+
+```text
+Cliente A + TMB-001
+        ↓ devolución validada
+TMB-001 disponible
+        ↓ nueva asignación
+Cliente B + TMB-001
+```
+
+El tambo conserva su identidad; únicamente cambian `clienteId`, `localidadId`, `fechaAsignacion` y el estado actual. Cada asignación genera un nuevo movimiento en `movimientos_activos_tambos`.
+
+## 19. Cambio de localidad del cliente
+
+Si el cliente cambia de localidad, el tambo continúa siendo el mismo activo físico. Administración debe registrar el cambio de localidad y actualizar la relación vigente del activo. Si el tambo se devuelve y se entrega otro, se registran dos operaciones: devolución del activo anterior y asignación del nuevo.
+
+El código del cliente puede cambiar conforme al Módulo 4, pero el `activoId` y el `codigoFisico` del tambo no cambian. Esto permite distinguir el historial del cliente del historial del inmueble prestado.
+
+## 20. Archivado o eliminación lógica del cliente
+
+Un cliente no se elimina físicamente de Firestore. Se archiva mediante un estado, por ejemplo:
+
+```text
+clientes/{clienteId}
+{
+  estado: "archivado",
+  archivadoEn,
+  archivadoPorUid,
+  motivoEstado: "relación terminada"
+}
+```
+
+Al archivar al cliente, el sistema debe quitar la relación activa del documento del cliente:
+
+```text
+requiereTambo: false
+activoTamboId: null
+capacidadTamboLitros: null
+codigoTamboFisico: null
+```
+
+Antes de completar el archivado debe existir una devolución validada del tambo, si el cliente tenía uno adherido. El activo no se archiva ni se elimina junto con el cliente: pasa a `disponible` si fue recibido correctamente, o a `en_revision` si existe una incidencia física.
+
+El historial de ventas, créditos, notas, solicitudes, activos y auditoría conserva `clienteId` como referencia histórica. El hecho de que el cliente esté archivado no borra las relaciones históricas ni modifica operaciones anteriores.
+
+## 21. Reglas actualizadas
+
+```text
+al archivar cliente:
+  exigir devolución validada si existe activoTamboId
+  retirar la relación activa del cliente
+  no eliminar el documento del activo
+  no eliminar movimientos ni auditorías
+  dejar el activo disponible o en revisión según resultado físico
+
+al reasignar tambo:
+  verificar que el activo esté disponible
+  verificar que el nuevo cliente no tenga otro activo
+  ejecutar asignación en transacción
+  crear movimiento y auditoría
+```
+
+La eliminación física de `clientes/{clienteId}`, `activos_tambos/{activoId}` y `movimientos_activos_tambos/{movimientoId}` queda prohibida. La aplicación ofrecerá `Archivar cliente`, no `Eliminar cliente`.
+
+## 22. Criterios adicionales de aceptación
+
+1. Un tambo conserva un único `activoId` durante toda su vida útil.
+2. El mismo tambo puede pasar de un cliente a otro solo después de una devolución validada.
+3. El historial de asignaciones permite saber con qué clientes estuvo relacionado el tambo.
+4. Archivar un cliente elimina únicamente la relación activa del cliente con el tambo.
+5. Archivar un cliente no elimina, duplica ni cambia la identidad del tambo.
+6. Un tambo disponible no contiene `clienteId` ni `localidadId` vigentes.
+7. El sistema nunca crea un nuevo tambo automáticamente por cambiar de localidad.
+8. La capacidad del tambo permanece asociada al activo y se copia en la relación del cliente para consulta rápida.
