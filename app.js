@@ -1,4 +1,10 @@
+import { authErrorMessage, loginWithPassword, logout, observeSession } from './auth-client.js';
+
 const app = document.querySelector('#app');
+let currentUser = null;
+let authLoading = true;
+let loginMessage = '';
+let loginBusy = false;
 
 const state = {
   view: 'inicio',
@@ -42,7 +48,7 @@ function toolbar(placeholder) { return `<div class="toolbar"><label class="searc
 function table(rows, headers) { return `<div class="data-table"><div class="data-row head">${headers.map(header => `<span>${header}</span>`).join('')}</div>${rows}</div>`; }
 
 function shell(content) {
-  app.innerHTML = `<div class="app-frame"><aside class="sidebar"><div class="brand"><span class="brand-mark">I</span><span><b>INGEST</b><small>Inventario y Gestión</small></span></div><p class="workspace">PANEL ADMINISTRATIVO</p><nav>${nav.map(([id, label]) => `<button class="nav-item ${state.view === id ? 'active' : ''}" data-view="${id}"><i>${icon[id]}</i><span>${label}</span>${id === 'devoluciones' ? '<b class="counter">2</b>' : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="connected"><i></i> Conectado a INGEST</div><div class="user"><span class="avatar">AM</span><span><b>Administrador</b><small>Sesión activa</small></span></div></div></aside><main class="main"><header class="topbar"><button class="mobile-menu" data-action="menu">☰</button><div class="crumb">Administración <span>/</span> <b>${title(state.view)}</b></div><div class="top-user">● <span>Administrador</span><span class="avatar">AM</span></div></header><div class="content">${content}</div></main></div><div id="toast" class="toast"></div>`;
+  app.innerHTML = `<div class="app-frame"><aside class="sidebar"><div class="brand"><span class="brand-mark">I</span><span><b>INGEST</b><small>Inventario y Gestión</small></span></div><p class="workspace">PANEL ADMINISTRATIVO</p><nav>${nav.map(([id, label]) => `<button class="nav-item ${state.view === id ? 'active' : ''}" data-view="${id}"><i>${icon[id]}</i><span>${label}</span>${id === 'devoluciones' ? '<b class="counter">2</b>' : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="connected"><i></i> Conectado a INGEST</div><div class="user"><span class="avatar">AM</span><span><b>Administrador</b><small>Sesión activa</small></span></div></div></aside><main class="main"><header class="topbar"><button class="mobile-menu" data-action="menu">☰</button><div class="crumb">Administración <span>/</span> <b>${title(state.view)}</b></div><div class="top-user"><span class="session-dot">●</span><span>${currentUser?.email || 'Sesión autenticada'}</span><button class="logout-button" data-action="logout">Cerrar sesión</button><span class="avatar">${(currentUser?.email || 'AM').slice(0,2).toUpperCase()}</span></div></header><div class="content">${content}</div></main></div><div id="toast" class="toast"></div>`;
   bind();
 }
 
@@ -74,7 +80,33 @@ function renderConfig() {
   shell(`${pageHeader('CONTROL DEL SISTEMA', 'Configuración general', 'Administra funciones opcionales sin alterar registros históricos ni reglas de seguridad.', action('Guardar cambios', 'save-settings', 'btn-primary'))}<div class="settings-layout"><aside class="settings-nav"><b>Configuración</b><button class="selected">Operación</button><button>Identificación</button><button>Clientes</button><button>Medidores y ventas</button><button>Devoluciones y tambos</button><button>Notificaciones</button><button>Seguridad</button></aside><div class="settings-main"><div class="config-status"><span>✓</span><div><b>Configuración sincronizada</b><small>Última actualización: hoy a las 10:16 · Administrador</small></div><button data-action="config-history">Ver historial</button></div><section class="settings-section"><p class="eyebrow">OPERACIÓN</p><h2>Comportamiento de la jornada</h2><p class="section-copy">Estas opciones definen qué puede hacer un usuario durante un turno.</p>${sw('jornadaObligatoria', 'Jornada obligatoria antes de operar', 'Impide ventas y devoluciones sin turno abierto', true)}${sw('cierreAutomatico', 'Cierre automático de jornada', 'Cierra operaciones abiertas al cambio de día')}${sw('permitirOffline', 'Permitir operación offline', 'Conserva operaciones pendientes para sincronizarlas después')}</section><section class="settings-section"><p class="eyebrow">IDENTIFICACIÓN</p><h2>Folio físico y QR opcional</h2><p class="section-copy">El identificador principal siempre es el folio o código físico del tambo.</p><div class="qr-setting"><div><b>QR único por cliente</b><p>Activa una vía adicional de identificación rápida. No sustituye el folio físico.</p></div><label class="switch large"><input type="checkbox" data-setting="qrClienteHabilitado" ${state.qrClienteHabilitado ? 'checked' : ''}><span></span></label></div><div class="fixed-rule">Regla fija <b>El folio del tambo continúa siendo la referencia operativa principal.</b></div></section><section class="settings-section"><p class="eyebrow">CLIENTES Y TAMBOS</p><h2>Reglas de asignación</h2><p class="section-copy">La configuración no puede romper los límites por tipo de cliente.</p>${sw('solicitudesChofer', 'Solicitudes de alta por chofer', 'El chofer solicita; administración aprueba')}${sw('multiplesTambosIndustriales', 'Múltiples tambos industriales', 'Solo aplica a industriales; comerciales conservan máximo uno')}</section></div></div>`);
 }
 
-function render() { ({ inicio: renderHome, clientes: renderClients, tambos: renderTanks, devoluciones: renderReturns, auditoria: renderAudit, configuracion: renderConfig }[state.view] || renderHome)(); }
+function renderLogin() {
+  app.innerHTML = `<main class="login-page"><section class="login-art"><div class="login-brand"><span class="brand-mark">I</span><span><b>INGEST</b><small>Inventario y Gestión</small></span></div><div class="login-message"><p class="eyebrow">ESPACIO OPERATIVO SEGURO</p><h1>Controla tu operación con claridad.</h1><p>Accede al panel con la cuenta creada previamente por administración.</p><div class="login-rule"><span>✓</span><span>Sin registro público · acceso administrado</span></div></div></section><section class="login-panel"><div class="login-card"><p class="eyebrow">BIENVENIDO A INGEST</p><h1>Iniciar sesión</h1><p class="login-copy">Usa el correo y contraseña asignados por el administrador.</p>${loginMessage ? `<div class="login-error" role="alert">${loginMessage}</div>` : ''}<form id="login-form" class="login-form"><label>Correo electrónico<input id="login-email" type="email" autocomplete="username" placeholder="nombre@empresa.com" required></label><label>Contraseña<input id="login-password" type="password" autocomplete="current-password" placeholder="Tu contraseña" required></label><button class="btn btn-primary login-submit" type="submit" ${loginBusy ? 'disabled' : ''}>${loginBusy ? 'Iniciando sesión…' : 'Entrar al panel'}</button></form><p class="login-footnote">¿Necesitas acceso? Solicítalo al administrador. No existe registro desde esta aplicación.</p></div></section></main>`;
+  document.querySelector('#login-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    loginBusy = true;
+    loginMessage = '';
+    renderLogin();
+    const email = document.querySelector('#login-email')?.value.trim() || '';
+    const password = document.querySelector('#login-password')?.value || '';
+    try {
+      await loginWithPassword(email, password);
+    } catch (error) {
+      loginMessage = authErrorMessage(error);
+      loginBusy = false;
+      renderLogin();
+    }
+  });
+}
+
+function render() {
+  if (authLoading) {
+    app.innerHTML = '<main class="auth-loading"><span class="brand-mark">I</span><p>Comprobando sesión…</p></main>';
+    return;
+  }
+  if (!currentUser) return renderLogin();
+  ({ inicio: renderHome, clientes: renderClients, tambos: renderTanks, devoluciones: renderReturns, auditoria: renderAudit, configuracion: renderConfig }[state.view] || renderHome)();
+}
 function toast(message) { const node = document.querySelector('#toast'); if (!node) return; node.textContent = message; node.classList.add('show'); setTimeout(() => node.classList.remove('show'), 2200); }
 function modal(titleText, body, buttons) { document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop"><div class="modal"><div class="modal-title"><div><p class="eyebrow">ADMINISTRACIÓN</p><h2>${titleText}</h2></div><button class="close" data-action="close">×</button></div><div class="modal-body">${body}</div><div class="modal-actions">${buttons || action('Cerrar', 'close', 'btn-quiet')}</div></div></div>`); bind(); }
 function bind() {
@@ -89,6 +121,7 @@ function bind() {
     if (name === 'save-settings') return modal('Confirmar cambios', '<div class="detail-note"><b>Se guardarán únicamente las opciones modificadas.</b><p>El cambio será registrado en la auditoría y no afectará operaciones históricas.</p></div>', action('Cancelar', 'close', 'btn-quiet') + action('Confirmar y guardar', 'preview', 'btn-primary'));
     if (name === 'config-history') return modal('Historial de configuración', '<div class="history"><b>QR por cliente</b><span>Desactivado · Administrador · hoy 10:16</span></div><div class="history"><b>Margen de lectura</b><span>5 dígitos · Administrador · ayer 18:42</span></div>');
     if (name === 'preview') { document.querySelector('.modal-backdrop')?.remove(); return toast('Vista preparada para conectar con Firestore'); }
+    if (name === 'logout') return logout();
     if (name === 'refresh') return toast('Información actualizada');
     if (name === 'menu') return document.querySelector('.sidebar')?.classList.toggle('open');
     if (name.includes('options') || name.includes('menu')) return toast('Menú de opciones preparado');
@@ -97,4 +130,9 @@ function bind() {
   document.querySelectorAll('[data-setting]').forEach(input => input.onchange = event => { state[event.target.dataset.setting] = event.target.checked; toast('Cambio guardado como borrador local'); });
   document.querySelectorAll('[data-search]').forEach(input => input.oninput = event => { const term = event.target.value.toLowerCase(); document.querySelectorAll('[data-row]').forEach(row => row.hidden = !row.dataset.row.toLowerCase().includes(term)); });
 }
-render();
+observeSession(user => {
+  currentUser = user;
+  authLoading = false;
+  loginBusy = false;
+  render();
+});
