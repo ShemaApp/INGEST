@@ -353,3 +353,209 @@ Este módulo no implementa todavía activos prestados, créditos, notas PDF, ven
 4. Confirmar si se utilizará código interno o QR para el cliente en esta nueva versión.
 
 No se implementará código ni se crearán colecciones hasta aprobar estas decisiones.
+
+
+# Enmienda aprobada — Versión 2.0
+
+Esta sección **sustituye cualquier decisión anterior en conflicto** dentro de este documento. La versión vigente del Módulo 4 queda definida por las siguientes reglas.
+
+## A. Alta de cliente mediante solicitud
+
+El chofer puede iniciar una solicitud de alta únicamente para una localidad que tenga asignada permanentemente. No crea directamente el cliente activo.
+
+Colección conceptual:
+
+```text
+solicitudes_alta_clientes/{solicitudId}
+```
+
+Campos mínimos:
+
+```text
+solicitadoPorUid
+localidadId
+nombre
+telefono
+tipo: comercial | industrial
+datosFiscales
+autorizadoPorUid
+estado: pendiente | aprobada | rechazada | requiere_correccion
+motivoResolucion
+clienteId
+creadoEn
+resueltoEn
+```
+
+El administrador dispone de un panel de **Solicitudes**. Puede aprobar, rechazar con motivo obligatorio o solicitar corrección. Solo una solicitud aprobada puede originar `clientes/{clienteId}`. Todas estas acciones quedan auditadas.
+
+## B. Datos fiscales para México
+
+Cuando el cliente solicite factura, la solicitud o el expediente aprobado debe incluir los datos típicos de facturación mexicana:
+
+```text
+razonSocial
+rfc
+codigoPostalFiscal
+regimenFiscal
+usoCfdi
+correoFiscal opcional
+```
+
+Los datos fiscales pueden quedar incompletos para un cliente que no solicita factura, pero la aplicación debe bloquear la emisión o solicitud de comprobante fiscal mientras falte un dato requerido.
+
+## C. Tarifas globales administradas
+
+El precio no se define individualmente por cliente. Administración controla las tarifas desde configuración:
+
+```text
+tarifas/{tarifaId}
+{
+  nombre: "Comercial",
+  codigo: "comercial",
+  unidadCobro: "garrafon_equivalente_19l",
+  precio: 15,
+  estado: "activa",
+  version: 1,
+  actualizadoPorUid,
+  actualizadoEn
+}
+```
+
+Las tarifas iniciales son:
+
+```text
+tarifa comercial
+tarifa industrial
+```
+
+El diseño permite agregar posteriormente otros conceptos. Si administración cambia una tarifa, el cambio aplica a todos los clientes de ese concepto para ventas nuevas. Cada venta conserva una copia inmutable de `tarifaId`, `versionTarifa`, `precioAplicado` y `tipoCliente`; por ello las ventas anteriores no cambian.
+
+Para industrial:
+
+```text
+garrafonesEquivalentes = litrosVendidos / 19
+total = garrafonesEquivalentes × precioIndustrial
+```
+
+## D. Folios de nota y conciliación con factura física
+
+La nota industrial de crédito recibe un folio interno generado por el sistema:
+
+```text
+nota_credito/{notaId}
+{
+  folioInterno,
+  clienteId,
+  localidadId,
+  choferUid,
+  ventaId,
+  total,
+  firma,
+  estado: pendiente | conciliada | pagada,
+  creadoEn
+}
+```
+
+El segundo folio no lo genera INGEST. Lo captura el administrador al guardar el abono que concilia la nota de crédito con la factura realizada físicamente:
+
+```text
+abonos_credito/{abonoId}
+{
+  notaCreditoId,
+  clienteId,
+  importe,
+  folioFacturaFisica,
+  registradoPorUid,
+  registradoEn,
+  estado
+}
+```
+
+El `folioFacturaFisica` es obligatorio para guardar el abono de conciliación. No reemplaza `folioInterno`; ambos permanecen vinculados. La captura del segundo folio genera un evento inmutable en `auditoria_creditos`.
+
+## E. Identificador permanente por localidad
+
+Cada cliente aprobado recibe un código generado por localidad. El formato es:
+
+```text
+<primeras tres letras normalizadas de localidad><consecutivo de localidad>
+```
+
+Ejemplo:
+
+```text
+MOC001
+MOC002
+MOC003
+```
+
+La secuencia es independiente por localidad, empieza en `001` y nunca disminuye. La desactivación de un cliente no libera ni reutiliza su código.
+
+Colección conceptual del contador:
+
+```text
+contadores_localidad/{localidadId}
+{
+  prefijo: "MOC",
+  ultimoConsecutivo: 3,
+  actualizadoEn,
+  actualizadoPorUid
+}
+```
+
+La generación del código debe ejecutarse en una transacción o mecanismo idempotente para impedir duplicados. Si un cliente activo cambia de localidad, recibe un nuevo código con el prefijo de la nueva localidad; el código anterior queda como histórico y no se reutiliza.
+
+El código se marca únicamente en el **tambo físico**. No se requiere todavía QR ni código de barras para esta función.
+
+## F. Regla de cliente y localidad vigente
+
+```text
+clientes/{clienteId}
+  localidadId obligatorio
+  codigoLocalidad inmutable mientras permanezca en la localidad
+  tipo comercial | industrial
+  tarifaId obligatorio para activar
+```
+
+El cliente no contiene un `choferUid` permanente. La visibilidad del chofer se resuelve por la asignación permanente de su localidad.
+
+## G. Auditoría obligatoria
+
+Deben auditarse, como mínimo:
+
+```text
+solicitar_alta
+aprobar_alta
+rechazar_alta
+corregir_solicitud
+crear_cliente
+cambiar_localidad
+cambiar_tipo
+cambiar_tarifa
+cambiar_datos_fiscales
+desactivar_cliente
+reactivar_cliente
+crear_nota_credito
+registrar_abono
+capturar_folio_factura_fisica
+generar_codigo_localidad
+```
+
+La auditoría registra `ejecutadoPorUid`, fecha, entidad, identificador, valores anteriores, valores nuevos, motivo y referencia de operación. Ningún administrador puede editar o eliminar la auditoría.
+
+## H. Decisiones que quedan cerradas
+
+1. El chofer solicita altas; administración aprueba.
+2. Las tarifas son globales por concepto y se administran desde configuración.
+3. El precio industrial es por garrafón equivalente de 19 L.
+4. La nota tiene folio interno del sistema.
+5. El folio de la factura física lo captura administración al guardar el abono conciliatorio.
+6. El código del cliente es por localidad y nunca se renumera hacia abajo.
+7. El cambio de localidad genera un nuevo código.
+8. El código se marca únicamente en el tambo físico.
+9. No se manejará nómina ni pago al chofer en este módulo.
+10. No se implementará nada hasta que esta enmienda sea aprobada.
+
+## I. Decisiones fuera de este módulo
+
+La firma digital, los activos prestados, el detalle de litros, las ventas industriales, los cierres de caja y el proceso completo de abonos se desarrollarán en sus módulos respectivos, utilizando los identificadores definidos aquí.
