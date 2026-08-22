@@ -2,42 +2,54 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function signedIn() {
       return request.auth != null;
     }
 
+    function profilePath(uid) {
+      return /databases/$(database)/documents/usuarios/$(uid);
+    }
+
+    function hasProfile(uid) {
+      return exists(profilePath(uid));
+    }
+
     function isAdmin() {
       return signedIn()
-        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
-        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin';
+        && hasProfile(request.auth.uid)
+        && get(profilePath(request.auth.uid)).data.rol == 'admin'
+        && get(profilePath(request.auth.uid)).data.activo == true;
     }
 
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // Los perfiles se crean desde Firebase Authentication + Firebase Console.
+    // La aplicación no permite registro ni creación pública de usuarios.
     match /usuarios/{uid} {
-      // El perfil inicial del administrador se crea manualmente desde Firebase Console.
-      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.rol == 'usuario';
-      allow update: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['nombre', 'telefono', 'actualizadoEn']);
-      allow delete: if isAdmin();
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if false;
+      allow update: if isAdmin()
+        || (isOwner(uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['nombre', 'telefono', 'actualizadoEn']));
+      allow delete: if false;
     }
 
-    match /_meta/{documentId} {
-      allow read: if signedIn();
-      allow write: if isAdmin();
-    }
-
+    // Configuración general: solo administración activa.
     match /configuracion/{documentId} {
       allow read: if isAdmin();
       allow create, update: if isAdmin()
+        && documentId == 'general'
         && request.resource.data.schemaVersion == 1
         && request.resource.data.updatedBy == request.auth.uid;
       allow delete: if false;
     }
 
+    // Auditoría: creación administrativa o desde una operación autorizada;
+    // nunca se edita ni se elimina.
     match /auditoria/{eventId} {
       allow read: if isAdmin();
       allow create: if isAdmin()
@@ -47,9 +59,130 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Las colecciones operativas se habilitarán por contrato, no mediante una escritura global.
+    // Datos maestros administrables. Se permite crear y actualizar para pruebas
+    // con admin; la eliminación física queda prohibida.
+    match /localidades/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /asignaciones_localidades/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /vehiculos/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /medidores/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /tarifas/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /clientes/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /solicitudes_alta_clientes/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /activos_tambos/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /devoluciones_tambos/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Registros históricos y movimientos: el admin puede consultarlos y crear
+    // eventos de corrección compensatoria, pero no editar ni borrar el original.
+    match /ventas/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /tickets_venta/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /notas_credito/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /abonos_credito/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /jornadas/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /lecturas_medidor/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /cierres_turno/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /movimientos_activos_tambos/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /operaciones_idempotencia/{documentId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Auditorías específicas por módulo también son inmutables.
+    match /{collectionName}/{eventId} {
+      allow read, create: if isAdmin()
+        && (collectionName == 'auditoria_usuarios'
+          || collectionName == 'auditoria_localidades'
+          || collectionName == 'auditoria_vehiculos'
+          || collectionName == 'auditoria_medidores'
+          || collectionName == 'auditoria_clientes'
+          || collectionName == 'auditoria_activos_tambos');
+      allow update, delete: if false;
+    }
+
+    // Todo lo que no esté expresamente definido permanece cerrado.
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
+
+/*
+  Nota de despliegue:
+  estas reglas conceden acceso global únicamente a un perfil autenticado con
+  rol 'admin' y activo true. No convierten la aplicación en abierta.
+  Las reglas de chofer y vendedor se incorporarán cuando sus flujos propios
+  estén implementados y probados.
+*/
+
+/*
+  Nota de consistencia:
+  las colecciones de datos maestros permiten update administrativo para las
+  pruebas. Los documentos históricos, movimientos y auditorías solo permiten
+  lectura y creación; el original nunca se actualiza ni se elimina.
+*/
