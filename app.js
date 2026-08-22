@@ -111,11 +111,21 @@ function renderLogin() {
   app.innerHTML = `<main class="login-page"><section class="login-art"><div class="login-brand"><span class="brand-mark">I</span><span><b>INGEST</b><small>Inventario y Gestión</small></span></div><div class="login-message"><p class="eyebrow">ESPACIO OPERATIVO SEGURO</p><h1>Controla tu operación con claridad.</h1><p>Accede al panel con la cuenta creada previamente por administración.</p><div class="login-rule"><span>✓</span><span>Sin registro público · acceso administrado</span></div></div></section><section class="login-panel"><div class="login-card"><p class="eyebrow">BIENVENIDO A INGEST</p><h1>Iniciar sesión</h1><p class="login-copy">Usa el correo y contraseña asignados por el administrador.</p>${loginMessage ? `<div class="login-error" role="alert">${loginMessage}</div>` : ''}<form id="login-form" class="login-form"><label>Correo electrónico<input id="login-email" type="email" autocomplete="username" placeholder="nombre@empresa.com" required></label><label>Contraseña<input id="login-password" type="password" autocomplete="current-password" placeholder="Tu contraseña" required></label><button class="btn btn-primary login-submit" type="submit" ${loginBusy ? 'disabled' : ''}>${loginBusy ? 'Iniciando sesión…' : 'Entrar al panel'}</button></form><p class="login-footnote">¿Necesitas acceso? Solicítalo al administrador. No existe registro desde esta aplicación.</p></div></section></main>`;
   document.querySelector('#login-form')?.addEventListener('submit', async event => {
     event.preventDefault();
+    const form = event.currentTarget;
+    const email = form.querySelector('#login-email')?.value.trim() || '';
+    const password = form.querySelector('#login-password')?.value || '';
+    if (!email || !password) {
+      loginMessage = !email ? 'Escribe un correo electrónico válido.' : 'Escribe tu contraseña.';
+      renderLogin();
+      return;
+    }
     loginBusy = true;
     loginMessage = '';
-    renderLogin();
-    const email = document.querySelector('#login-email')?.value.trim() || '';
-    const password = document.querySelector('#login-password')?.value || '';
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Iniciando sesión…';
+    }
     try {
       await loginWithPassword(email, password);
     } catch (error) {
