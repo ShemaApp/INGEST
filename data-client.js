@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
   runTransaction,
   serverTimestamp
@@ -15,6 +16,28 @@ const configurationRef = doc(db, 'configuracion', 'general');
 export async function loadGeneralConfiguration() {
   const snapshot = await getDoc(configurationRef);
   return snapshot.exists() ? snapshot.data() : null;
+}
+
+export async function loadClients() {
+  const snapshot = await getDocs(collection(db, 'clientes'));
+  return snapshot.docs.map(item => {
+    const data = item.data();
+    const activeTamboIds = Array.isArray(data.activoTamboIds) ? data.activoTamboIds : [];
+    return {
+      id: item.id,
+      code: data.clienteId || data.codigoCliente || item.id,
+      name: data.nombre || data.razonSocial || 'Cliente sin nombre',
+      type: data.tipoCliente || data.tipo || 'Sin tipo',
+      locality: data.localidadNombre || data.localidadId || 'Sin localidad',
+      tanks: Number.isFinite(data.cantidadTambosAsignados)
+        ? data.cantidadTambosAsignados
+        : activeTamboIds.length,
+      pending: Number.isFinite(data.devolucionesPendientes)
+        ? data.devolucionesPendientes
+        : 0,
+      status: data.estado || (data.activo === false ? 'Archivado' : 'Activo')
+    };
+  });
 }
 
 export async function saveGeneralConfiguration({ values, changedKeys, actor }) {

@@ -1,5 +1,5 @@
 import { authErrorMessage, loginWithPassword, logout } from './auth-client.js';
-import { loadGeneralConfiguration, saveGeneralConfiguration } from './data-client.js';
+import { loadClients, loadGeneralConfiguration, saveGeneralConfiguration } from './data-client.js';
 import { startSession } from './session.js';
 
 const app = document.querySelector('#app');
@@ -21,11 +21,9 @@ const state = {
   permitirOffline: true,
   solicitudesChofer: true,
   multiplesTambosIndustriales: true,
-  clients: [
-    { code: 'MOC025', name: 'Empacadora del Valle', type: 'Industrial', locality: 'Mochomera', tanks: 3, pending: 1 },
-    { code: 'MOC026', name: 'Abarrotes La Entrada', type: 'Comercial', locality: 'Mochomera', tanks: 1, pending: 0 },
-    { code: 'ROS011', name: 'Familia López', type: 'Comercial', locality: 'Rosario', tanks: 0, pending: 0 }
-  ],
+  clients: [],
+  clientsLoading: false,
+  clientsError: '',
   tanks: [
     { code: 'TMB-0001', capacity: '250 L', client: 'Empacadora del Valle', status: 'Adherido' },
     { code: 'TMB-0002', capacity: '600 L', client: 'Empacadora del Valle', status: 'En devolución' },
@@ -64,8 +62,18 @@ function renderHome() {
 }
 
 function renderClients() {
-  const rows = state.clients.map(client => `<div class="data-row" data-row="${esc(client.name)} ${client.code} ${client.locality}"><span class="person"><span class="avatar pale">${client.name.slice(0,2).toUpperCase()}</span><span><b>${esc(client.name)}</b><small>${client.code}</small></span></span><span>${status(client.type)}</span><span>${client.locality}</span><span><b>${client.tanks}</b>${client.pending ? `<small class="pending"> · ${client.pending} pendiente</small>` : ''}</span><span>${status('Activo')}</span><span>${action('Ver ficha', `client:${client.code}`, 'btn-small')}${more('client-menu')}</span></div>`).join('');
-  shell(`${pageHeader('GESTIÓN DE CLIENTES', 'Clientes', 'Expedientes generales agrupados por localidad, tipo y activos prestados.', action('Nuevo cliente', 'new-client', 'btn-primary') + more('client-options'))}${toolbar('Buscar por nombre, código, RFC o teléfono')}<section class="panel table-panel"><div class="table-meta"><b>${state.clients.length}</b> expedientes mostrados <span>Última actualización: hace 2 min</span></div>${table(rows, ['Cliente', 'Tipo', 'Localidad', 'Tambos', 'Estado', ''])}</section>`);
+  let content = '';
+  if (state.clientsLoading) {
+    content = '<div class="empty-state"><strong>Cargando clientes…</strong><span>Consultando la colección real de Firestore.</span></div>';
+  } else if (state.clientsError) {
+    content = `<div class="empty-state"><strong>No se pudieron cargar los clientes</strong><span>${esc(state.clientsError)}</span>${action('Reintentar', 'reload-clients', 'btn-primary')}</div>`;
+  } else if (!state.clients.length) {
+    content = '<div class="empty-state"><strong>No hay clientes registrados</strong><span>La colección clientes está vacía o aún no contiene documentos.</span></div>';
+  } else {
+    const rows = state.clients.map(client => `<div class="data-row" data-row="${esc(client.name)} ${client.code} ${client.locality}"><span class="person"><span class="avatar pale">${client.name.slice(0,2).toUpperCase()}</span><span><b>${esc(client.name)}</b><small>${esc(client.code)}</small></span></span><span>${status(client.type)}</span><span>${esc(client.locality)}</span><span><b>${client.tanks}</b>${client.pending ? `<small class="pending"> · ${client.pending} pendiente</small>` : ''}</span><span>${status(client.status)}</span><span>${action('Ver ficha', `client:${client.code}`, 'btn-small')}${more('client-menu')}</span></div>`).join('');
+    content = table(rows, ['Cliente', 'Tipo', 'Localidad', 'Tambos', 'Estado', '']);
+  }
+  shell(`${pageHeader('GESTIÓN DE CLIENTES', 'Clientes', 'Expedientes generales agrupados por localidad, tipo y activos prestados.', action('Nuevo cliente', 'new-client', 'btn-primary'))}${toolbar('Buscar por nombre, código, RFC o teléfono')}<section class="panel table-panel"><div class="table-meta"><b>${state.clients.length}</b> expedientes mostrados <span>Datos sincronizados desde Firestore</span></div>${content}</section>`);
 }
 
 function renderTanks() {
@@ -141,6 +149,22 @@ function renderAccessDenied() {
   bind();
 }
 
+async function refreshClients() {
+  state.clientsLoading = true;
+  state.clientsError = '';
+  if (state.view === 'clientes') renderClients();
+  try {
+    state.clients = await loadClients();
+  } catch (error) {
+    state.clientsError = error?.code === 'permission-denied'
+      ? 'Firebase rechazó la lectura. Verifica las reglas de la colección clientes.'
+      : 'Revisa la conexión y la configuración del proyecto Firebase.';
+  } finally {
+    state.clientsLoading = false;
+    if (state.view === 'clientes') renderClients();
+  }
+}
+
 function render() {
   if (authLoading || sessionStatus === 'loading') {
     app.innerHTML = '<main class="auth-loading"><span class="brand-mark">I</span><p>Comprobando sesión…</p></main>';
@@ -172,6 +196,7 @@ function bind() {
     if (name === 'save-config') return persistConfiguration();
     if (name === 'preview') { document.querySelector('.modal-backdrop')?.remove(); return toast('Vista preparada para conectar con Firestore'); }
     if (name === 'logout') return logout();
+    if (name === 'reload-clients') return refreshClients();
     if (name === 'refresh') return toast('Información actualizada');
     if (name === 'menu') return document.querySelector('.sidebar')?.classList.toggle('open');
     if (name.includes('options') || name.includes('menu')) return toast('Menú de opciones preparado');
@@ -215,4 +240,5 @@ startSession(async session => {
   }
 
   render();
+  if (session.status === 'authenticated' && session.profile?.rol === 'admin') refreshClients();
 });
