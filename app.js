@@ -1,8 +1,12 @@
-import { authErrorMessage, loginWithPassword, logout, observeSession } from './auth-client.js';
+import { authErrorMessage, loginWithPassword, logout } from './auth-client.js';
 import { loadGeneralConfiguration, saveGeneralConfiguration } from './data-client.js';
+import { startSession } from './session.js';
 
 const app = document.querySelector('#app');
 let currentUser = null;
+let currentProfile = null;
+let sessionStatus = 'loading';
+let sessionReason = '';
 let authLoading = true;
 let loginMessage = '';
 let loginBusy = false;
@@ -122,12 +126,19 @@ function renderLogin() {
   });
 }
 
+function renderAccessDenied() {
+  app.innerHTML = `<main class="auth-loading"><span class="brand-mark">I</span><h1>Acceso no disponible</h1><p>${esc(sessionReason || 'Tu perfil no tiene acceso a este espacio de trabajo.')}</p><button class="btn btn-primary" data-action="logout">Cerrar sesión</button></main>`;
+  bind();
+}
+
 function render() {
-  if (authLoading) {
+  if (authLoading || sessionStatus === 'loading') {
     app.innerHTML = '<main class="auth-loading"><span class="brand-mark">I</span><p>Comprobando sesión…</p></main>';
     return;
   }
-  if (!currentUser) return renderLogin();
+  if (!currentUser || sessionStatus === 'unauthenticated') return renderLogin();
+  if (sessionStatus !== 'authenticated') return renderAccessDenied();
+  if (currentProfile?.rol !== 'admin' || currentProfile?.activo !== true) return renderAccessDenied();
   ({ inicio: renderHome, clientes: renderClients, tambos: renderTanks, devoluciones: renderReturns, auditoria: renderAudit, configuracion: renderConfig }[state.view] || renderHome)();
 }
 function toast(message) { const node = document.querySelector('#toast'); if (!node) return; node.textContent = message; node.classList.add('show'); setTimeout(() => node.classList.remove('show'), 2200); }
@@ -159,12 +170,16 @@ function bind() {
   document.querySelectorAll('[data-setting]').forEach(input => input.onchange = event => { state[event.target.dataset.setting] = event.target.checked; toast('Cambio guardado como borrador local'); });
   document.querySelectorAll('[data-search]').forEach(input => input.oninput = event => { const term = event.target.value.toLowerCase(); document.querySelectorAll('[data-row]').forEach(row => row.hidden = !row.dataset.row.toLowerCase().includes(term)); });
 }
-observeSession(async user => {
-  currentUser = user;
-  authLoading = false;
+startSession(async session => {
+  sessionStatus = session.status;
+  currentUser = session.user;
+  currentProfile = session.profile;
+  sessionReason = session.reason || '';
+  authLoading = session.status === 'loading';
   loginBusy = false;
   configurationError = '';
-  if (user) {
+
+  if (session.status === 'authenticated' && session.profile?.rol === 'admin') {
     try {
       const remote = await loadGeneralConfiguration();
       const defaults = {
@@ -180,11 +195,14 @@ observeSession(async user => {
       state.savedSettings = { ...loaded };
       configurationReady = true;
     } catch (error) {
-      configurationError = error?.code === 'permission-denied' ? 'Tu cuenta inició sesión, pero no tiene permiso para leer la configuración administrativa.' : 'No se pudo cargar la configuración general.';
+      configurationError = error?.code === 'permission-denied'
+        ? 'Tu cuenta inició sesión, pero no tiene permiso para leer la configuración administrativa.'
+        : 'No se pudo cargar la configuración general.';
     }
   } else {
     configurationReady = false;
     state.savedSettings = undefined;
   }
+
   render();
 });
